@@ -293,13 +293,15 @@ def pfilter(f, patterns=None, excludes=None, use_regex=False):
     return False
 
 
-def agefilter(st, now, age, timestamp):
-    '''filter files older than age'''
+def agefilter(st, since, age, timestamp):
+    '''filter files older than age and younger than since'''
+    st_time = getattr(st, "st_%s" % timestamp)
     if age is None:
+        if since is None or since >= st_time:
+            return True
+    elif age >= 0 and since - st_time >= abs(age) and since <= st_time:
         return True
-    elif age >= 0 and now - getattr(st, "st_%s" % timestamp) >= abs(age):
-        return True
-    elif age < 0 and now - getattr(st, "st_%s" % timestamp) <= abs(age):
+    elif age < 0 and since - st_time <= abs(age) since >= st_time:
         return True
     return False
 
@@ -406,6 +408,7 @@ def main():
             read_whole_file=dict(type='bool', default=False),
             file_type=dict(type='str', default="file", choices=['any', 'directory', 'file', 'link']),
             age=dict(type='str'),
+            since=dict(type='str'),
             age_stamp=dict(type='str', default="mtime", choices=['atime', 'ctime', 'mtime']),
             size=dict(type='str'),
             recurse=dict(type='bool', default=False),
@@ -444,6 +447,17 @@ def main():
         else:
             module.fail_json(age=params['age'], msg="failed to process age")
 
+    if params['since'] is None:
+        since = None
+    else
+        # convert since to seconds:
+        m = re.match(r"^(-?\d+)(s|m|h|d|w)?$", params['since'].lower())
+        seconds_per_unit = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+        if m:
+            since = int(m.group(1)) * seconds_per_unit.get(m.group(2), 1)
+        else:
+            module.fail_json(since=params['since'], msg="failed to process since")
+
     if params['size'] is None:
         size = None
     else:
@@ -456,6 +470,10 @@ def main():
             module.fail_json(size=params['size'], msg="failed to process size")
 
     now = time.time()
+    if since is None:
+        since = now
+    else:
+        since = now + since
     msg = 'All paths examined'
     looked = 0
     has_warnings = False
@@ -489,7 +507,7 @@ def main():
 
                     r = {'path': fsname}
                     if params['file_type'] == 'any':
-                        if pfilter(fsobj, params['patterns'], params['excludes'], params['use_regex']) and agefilter(st, now, age, params['age_stamp']):
+                        if pfilter(fsobj, params['patterns'], params['excludes'], params['use_regex']) and agefilter(st, since, age, params['age_stamp']):
 
                             r.update(statinfo(st))
                             if stat.S_ISREG(st.st_mode) and params['get_checksum']:
@@ -502,14 +520,14 @@ def main():
                                 filelist.append(r)
 
                     elif stat.S_ISDIR(st.st_mode) and params['file_type'] == 'directory':
-                        if pfilter(fsobj, params['patterns'], params['excludes'], params['use_regex']) and agefilter(st, now, age, params['age_stamp']):
+                        if pfilter(fsobj, params['patterns'], params['excludes'], params['use_regex']) and agefilter(st, since, age, params['age_stamp']):
 
                             r.update(statinfo(st))
                             filelist.append(r)
 
                     elif stat.S_ISREG(st.st_mode) and params['file_type'] == 'file':
                         if pfilter(fsobj, params['patterns'], params['excludes'], params['use_regex']) and \
-                           agefilter(st, now, age, params['age_stamp']) and \
+                           agefilter(st, since, age, params['age_stamp']) and \
                            sizefilter(st, size) and contentfilter(fsname, params['contains'], params['read_whole_file']):
 
                             r.update(statinfo(st))
@@ -518,7 +536,7 @@ def main():
                             filelist.append(r)
 
                     elif stat.S_ISLNK(st.st_mode) and params['file_type'] == 'link':
-                        if pfilter(fsobj, params['patterns'], params['excludes'], params['use_regex']) and agefilter(st, now, age, params['age_stamp']):
+                        if pfilter(fsobj, params['patterns'], params['excludes'], params['use_regex']) and agefilter(st, since, age, params['age_stamp']):
 
                             r.update(statinfo(st))
                             filelist.append(r)
